@@ -1,3 +1,7 @@
+.env
 config.txt
+*.o
+*.out
 sender
 receiver
+encode_test
