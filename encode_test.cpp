@@ -35,5 +35,20 @@ int main(){
     }
     std::cout << "codec opened succesfully" << std::endl;
 
+    AVFrame* frame = av_frame_alloc();
+    if(!frame) {
+        std::cerr << "Failure to allocate frame" << std::endl;
+    }
+
+    frame->format = c->pix_fmt;
+    frame->width  = c->width;
+    frame->height = c->height;
+
+    int buffer = av_frame_get_buffer(frame, 0);
+    if(buffer < 0) {
+    std::cerr << "Failure to allocate buffer" << std::endl;
+    return 1;
+}
+    std::cout << "buffer allocate succefully" << std::endl;
     return 0;
 }
