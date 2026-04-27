@@ -51,15 +51,13 @@ int main() {
         return 1;
     }
 
-    char buffer[1024];
+    char buffer[1408];
     sockaddr_in sender;
     socklen_t senderSize = sizeof(sender);
 
     while (true){
-        recvfrom(soc, buffer, sizeof(buffer), 0, (sockaddr*)&sender, &senderSize  );
-
-        std::cout << "received " << buffer << " from " << inet_ntoa(sender.sin_addr) << std::endl;
+        int bytes = recvfrom(soc, buffer, sizeof(buffer), 0, (sockaddr*)&sender, &senderSize);
+        std::cout << "received " << bytes << " bytes from " << inet_ntoa(sender.sin_addr) << std::endl;
     }
-
     return 0;
 }

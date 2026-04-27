@@ -1,9 +1,26 @@
 #include <iostream>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <string> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 extern "C" {
     #include <libavcodec/avcodec.h>
     #include <libavutil/opt.h>
     #include <libavutil/imgutils.h> 
 }
+
+struct ChunkHeader
+{
+    uint16_t packet_id;
+    uint16_t chunk_index;
+    uint16_t total_chunk;
+    uint16_t data_size;
+};
+
 int main(){
     const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_H264);
     if (!codec){
@@ -48,7 +65,104 @@ int main(){
     if(buffer < 0) {
     std::cerr << "Failure to allocate buffer" << std::endl;
     return 1;
-}
+    }
     std::cout << "buffer allocate succefully" << std::endl;
+
+
+    int port = 0;
+    std::string device = "";
+
+    std::ifstream configFile("config.txt");
+    if(!configFile) {
+        std::cerr << "config file failed to load" << std::endl;
+        return 1;
+    }
+
+    std::string line;
+    while(std::getline(configFile, line)) {
+        std::string key = line.substr(0, line.find('='));
+        std::string value = line.substr(line.find('=') + 1);
+        if(key == "PORT") {
+            port = std::stoi(value);
+        }
+    }
+
+
+    int soc = socket(AF_INET, SOCK_DGRAM, 0);
+    if(soc == -1) {
+        std::cerr << "socket failed" << std::endl;
+        return 1;
+    }
+    sockaddr_in destination;
+    destination.sin_family = AF_INET;
+    destination.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &destination.sin_addr);
+    
+
+    AVPacket* packet = av_packet_alloc();
+    if(!packet){
+        std::cerr << "packet failed allocate" << std::endl;
+        return 1;
+    }
+    std::cout << "packet allocated succefully" << std::endl;
+
+
+    for(int y = 0; y < c->height; y ++){
+        for(int x = 0; x < c->width; x ++){
+            frame->data[0][y * frame->linesize[0] + x] = 0;
+        }
+    }
+
+
+    for(int y = 0; y < c->height/2; y++) {
+        for(int x = 0; x < c->width/2; x++) {
+            frame->data[1][y * frame->linesize[1] + x] = 128;
+            frame->data[2][y * frame->linesize[2] + x] = 128;
+            }
+    }
+
+    for(int i = 0; i < 30; i++) {
+        frame->pts = i;
+
+
+        int send = avcodec_send_frame(c, frame);
+        if(send < 0) {
+            std::cerr << "failed to send frame" << std::endl;
+            return 1;
+        }
+
+
+        int receive = avcodec_receive_packet(c, packet);
+        if(receive < 0) {
+            std::cerr << "failed to receive packet" << std::endl;
+            return 1;
+        }
+        std::cout << "encoded packet, size: " << packet->size << std::endl;
+
+
+        int total_chunks = (packet->size + 1399) / 1400;
+        for(int j = 0; j < total_chunks; j++) {
+            int offset = j * 1400;
+            int chunk_size = std::min(1400, packet->size - offset);
+
+            ChunkHeader header;
+            header.packet_id = i;
+            header.chunk_index = j;
+            header.total_chunk = total_chunks;
+            header.data_size = chunk_size;
+
+            uint8_t udp_buffer[1408]; // header = 8 and 1400 bytes data
+            memcpy(udp_buffer, &header, sizeof(ChunkHeader));
+            memcpy(udp_buffer + sizeof(ChunkHeader), packet->data + offset, chunk_size);
+
+            sendto(soc, udp_buffer, sizeof(ChunkHeader) + chunk_size, 0, (sockaddr*)&destination, sizeof(destination));
+        }
+        
+
+
+    }
+
+
+
     return 0;
 }

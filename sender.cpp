@@ -4,6 +4,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fstream>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 std::string buildaddr(std::string device, int port) {
     return device + ":" + std::to_string(port);
