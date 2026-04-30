@@ -6,7 +6,12 @@
 #include <arpa/inet.h>
 #include <fstream>
 
-
+struct ChunkHeader {
+    uint16_t packet_id;
+    uint16_t chunk_index;
+    uint16_t total_chunks;
+    uint16_t data_size;
+};
 
 int port = 0;
 
@@ -40,7 +45,6 @@ int main() {
 
 
 
-
     sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(port);
@@ -51,13 +55,36 @@ int main() {
         return 1;
     }
 
-    char buffer[1408];
+    uint8_t buffer[1408];
     sockaddr_in sender;
     socklen_t senderSize = sizeof(sender);
 
+    uint8_t reassembly[1400 * 10];
+    int chunks_received = 0;
+
     while (true){
         int bytes = recvfrom(soc, buffer, sizeof(buffer), 0, (sockaddr*)&sender, &senderSize);
-        std::cout << "received " << bytes << " bytes from " << inet_ntoa(sender.sin_addr) << std::endl;
+
+        ChunkHeader header;
+        memcpy(&header, buffer, sizeof(ChunkHeader));
+
+        memcpy(reassembly + (header.chunk_index * 1400),
+            buffer + sizeof(ChunkHeader),
+            header.data_size);
+        
+        chunks_received ++;
+
+        std::cout << "packet_id: " << header.packet_id 
+        << " chunk: " << header.chunk_index 
+        << "/" << header.total_chunks 
+        << " size: " << header.data_size 
+        << std::endl;
+        
+        if(chunks_received == header.total_chunks) {
+            std::cout << "packet completed" << std::endl;
+            chunks_received = 0;
+        }
+    
     }
     return 0;
 }
