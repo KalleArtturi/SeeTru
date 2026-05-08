@@ -6,6 +6,12 @@
 #include <arpa/inet.h>
 #include <fstream>
 
+extern "C" {
+    #include <libavcodec/avcodec.h>
+    #include <libavutil/opt.h>
+    #include <libavutil/imgutils.h> 
+}
+
 struct ChunkHeader {
     uint16_t packet_id;
     uint16_t chunk_index;
@@ -55,12 +61,32 @@ int main() {
         return 1;
     }
 
+    const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+    if (!codec) {
+        std::cerr << "unable to find decoder" << std::endl;
+        return 1;
+    }
+
+    AVCodecContext* c = avcodec_alloc_context3(codec);
+    if(!c) {
+        std::cerr << "failed to allocate context" << std::endl;
+        return 1;
+    }
+    
+    int open = avcodec_open2(c, codec , NULL);
+    if(open < 0 ) {
+        std::cerr << "unable to open decoding codec " << std::endl;
+        return 1;
+    }
+
     uint8_t buffer[1408];
     sockaddr_in sender;
     socklen_t senderSize = sizeof(sender);
 
-    uint8_t reassembly[1400 * 10];
+    uint8_t reassembly[1400 * 25];
+
     int chunks_received = 0;
+    int total_size = 0;
 
     while (true){
         int bytes = recvfrom(soc, buffer, sizeof(buffer), 0, (sockaddr*)&sender, &senderSize);
@@ -68,10 +94,17 @@ int main() {
         ChunkHeader header;
         memcpy(&header, buffer, sizeof(ChunkHeader));
 
+        if(header.chunk_index * 1400 + header.data_size > sizeof(reassembly)) {
+            std::cerr << "chunk too large, dropping" << std::endl;
+            continue;
+        }
+
+
         memcpy(reassembly + (header.chunk_index * 1400),
             buffer + sizeof(ChunkHeader),
             header.data_size);
-        
+
+        total_size += header.data_size;
         chunks_received ++;
 
         std::cout << "packet_id: " << header.packet_id 
@@ -81,8 +114,32 @@ int main() {
         << std::endl;
         
         if(chunks_received == header.total_chunks) {
+            AVPacket* pkt = av_packet_alloc();
+            av_new_packet(pkt, total_size);
+            memcpy(pkt->data, reassembly, total_size);
+
+            int ret = avcodec_send_packet(c, pkt);
+            if(ret < 0) {
+                char errbuf[64];
+                av_strerror(ret, errbuf, sizeof(errbuf));
+                std::cerr << "failed to send packet: " << errbuf << std::endl;
+            }
+
+            AVFrame* frame = av_frame_alloc();
+            int ret2 = avcodec_receive_frame(c, frame);
+            if(ret2 == 0) {
+                std::cout << "decoded frame: " << frame->width << "x" << frame->height << std::endl;
+            } 
+            else if(ret2 == AVERROR(EAGAIN)) {
+            } 
+            else {
+                std::cerr << "decode error" << std::endl;
+            }
+            av_frame_free(&frame);
+
             std::cout << "packet completed" << std::endl;
             chunks_received = 0;
+            total_size = 0;
         }
     
     }

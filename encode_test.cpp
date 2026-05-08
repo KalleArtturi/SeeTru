@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <opencv2/opencv.hpp>
 
 extern "C" {
     #include <libavcodec/avcodec.h>
@@ -47,7 +48,7 @@ int main(){
 
     int open = avcodec_open2(c , codec, NULL);
     if(open < 0){
-        std::cerr << "could not open codec" << std::endl;
+        std::cerr << "could not open encryption codec" << std::endl;
         return 1;
     }
     std::cout << "codec opened succesfully" << std::endl;
@@ -78,6 +79,8 @@ int main(){
         return 1;
     }
 
+
+    
     std::string line;
     while(std::getline(configFile, line)) {
         std::string key = line.substr(0, line.find('='));
@@ -107,23 +110,29 @@ int main(){
     std::cout << "packet allocated succefully" << std::endl;
 
 
-    for(int y = 0; y < c->height; y ++){
-        for(int x = 0; x < c->width; x ++){
-            frame->data[0][y * frame->linesize[0] + x] = 0;
-        }
+
+    cv::VideoCapture cap(0);  // 0 = default camera
+    
+    if(!cap.isOpened()) {
+        std::cerr << "camera failed to open" << std::endl;
+        return 1;
     }
 
 
-    for(int y = 0; y < c->height/2; y++) {
-        for(int x = 0; x < c->width/2; x++) {
-            frame->data[1][y * frame->linesize[1] + x] = 128;
-            frame->data[2][y * frame->linesize[2] + x] = 128;
-            }
-    }
 
     for(int i = 0; i < 30; i++) {
-        frame->pts = i;
+        cv::Mat frame_bgr;
+        cap >> frame_bgr;
+        cv::Mat resized;
+        cv::resize(frame_bgr, resized, cv::Size(1280, 720));
+        cv::Mat yuv;
+        cv::cvtColor(resized, yuv, cv::COLOR_BGR2YUV_I420);
 
+        memcpy(frame->data[0], yuv.data, 1280 * 720);
+        memcpy(frame->data[1], yuv.data + 1280 * 720, 1280 * 720 / 4);
+        memcpy(frame->data[2], yuv.data + 1280 * 720 * 5/4, 1280 * 720 / 4);
+
+        frame->pts = i;
 
         int send = avcodec_send_frame(c, frame);
         if(send < 0) {
