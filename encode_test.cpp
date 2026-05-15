@@ -7,6 +7,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <opencv2/opencv.hpp>
+#include<csignal>
+#include <unistd.h>
 
 extern "C" {
     #include <libavcodec/avcodec.h>
@@ -22,7 +24,17 @@ struct ChunkHeader
     uint16_t data_size;
 };
 
+
+bool running = true;
+
+void handle_signal(int sig) {
+    running = false;
+}
+
 int main(){
+
+    signal(SIGINT,handle_signal);
+
     const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_H264);
     if (!codec){
         std::cerr << "codec not found" << std::endl;
@@ -43,8 +55,12 @@ int main(){
     c->width = 1280;
     c->height = 720;
     c->pix_fmt = AV_PIX_FMT_YUV420P;
+    c->gop_size = 30;
+    c->rc_max_rate = 2000000;
+    c->rc_buffer_size = 4000000;
     av_opt_set(c->priv_data, "preset", "ultrafast", 0);
     av_opt_set(c->priv_data, "tune", "zerolatency", 0);
+    av_opt_set(c->priv_data, "intra-refresh", "1", 0);
 
     int open = avcodec_open2(c , codec, NULL);
     if(open < 0){
@@ -119,8 +135,9 @@ int main(){
     }
 
 
+    int frame_count = 0;
 
-    for(int i = 0; i < 30; i++) {
+    while(running){
         cv::Mat frame_bgr;
         cap >> frame_bgr;
         cv::Mat resized;
@@ -132,7 +149,8 @@ int main(){
         memcpy(frame->data[1], yuv.data + 1280 * 720, 1280 * 720 / 4);
         memcpy(frame->data[2], yuv.data + 1280 * 720 * 5/4, 1280 * 720 / 4);
 
-        frame->pts = i;
+        frame->pts = frame_count;
+        frame_count ++;
 
         int send = avcodec_send_frame(c, frame);
         if(send < 0) {
@@ -155,7 +173,7 @@ int main(){
             int chunk_size = std::min(1400, packet->size - offset);
 
             ChunkHeader header;
-            header.packet_id = i;
+            header.packet_id = frame_count;
             header.chunk_index = j;
             header.total_chunk = total_chunks;
             header.data_size = chunk_size;
@@ -166,12 +184,16 @@ int main(){
 
             sendto(soc, udp_buffer, sizeof(ChunkHeader) + chunk_size, 0, (sockaddr*)&destination, sizeof(destination));
         }
-        
 
 
     }
 
 
+    avcodec_free_context(&c);
+    av_frame_free(&frame);
+    av_packet_free(&packet);
+    close(soc);
+    std::cout << "cleaned up, exiting" << std::endl;
 
     return 0;
 }
