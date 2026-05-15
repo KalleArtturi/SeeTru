@@ -5,6 +5,8 @@
 #include <cstring>
 #include <arpa/inet.h>
 #include <fstream>
+#include<csignal>
+#include <unistd.h>
 
 extern "C" {
     #include <libavcodec/avcodec.h>
@@ -19,9 +21,19 @@ struct ChunkHeader {
     uint16_t data_size;
 };
 
+
 int port = 0;
 
+
+bool running = true;
+
+void handle_signal(int sig) {
+    running = false;
+}
+
 int main() {
+
+    signal(SIGINT,handle_signal);
 
     int soc = socket (AF_INET, SOCK_DGRAM, 0);
     if (soc == -1) {
@@ -61,6 +73,12 @@ int main() {
         return 1;
     }
 
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(soc, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+
     const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (!codec) {
         std::cerr << "unable to find decoder" << std::endl;
@@ -83,22 +101,38 @@ int main() {
     sockaddr_in sender;
     socklen_t senderSize = sizeof(sender);
 
-    uint8_t reassembly[1400 * 25];
+    uint8_t reassembly[1400 * 60];
 
     int chunks_received = 0;
     int total_size = 0;
 
-    while (true){
+    while (running){
         int bytes = recvfrom(soc, buffer, sizeof(buffer), 0, (sockaddr*)&sender, &senderSize);
-
+        if(bytes < 0) continue;
+        if(bytes < (int)sizeof(ChunkHeader)) continue;
+        
         ChunkHeader header;
         memcpy(&header, buffer, sizeof(ChunkHeader));
+
+        if(header.total_chunks == 0 || header.total_chunks > 60) {
+            std::cerr << "invalid header, dropping" << std::endl;
+            continue;
+        }
+        if(header.chunk_index >= header.total_chunks) {
+            std::cerr << "invalid chunk index, dropping" << std::endl;
+            continue;
+        }
+        if(header.data_size == 0 || header.data_size > 1400) {
+            std::cerr << "invalid data size, dropping" << std::endl;
+            continue;
+        }
+
+        
 
         if(header.chunk_index * 1400 + header.data_size > sizeof(reassembly)) {
             std::cerr << "chunk too large, dropping" << std::endl;
             continue;
         }
-
 
         memcpy(reassembly + (header.chunk_index * 1400),
             buffer + sizeof(ChunkHeader),
@@ -143,5 +177,10 @@ int main() {
         }
     
     }
+
+    close(soc);
+    std::cout << "cleaned up, exiting" << std::endl;
+
+
     return 0;
 }
